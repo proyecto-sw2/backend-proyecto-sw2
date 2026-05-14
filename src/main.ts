@@ -47,7 +47,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  // Iniciar la aplicación en el puerto 3000
+  // Iniciar la aplicación en el puerto 3000 eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTEsImVtYWlsIjoid2lsc29uQGdtYWlsLmNvbSIsImlhdCI6MTc3Mzg5MDE0NSwiZXhwIjoxNzczOTc2NTQ1fQ.QKcu9Wgc9Eo38GbV54QNTylxXtJxHY1hTskA8qg_Y1Y
   await app.listen(parseInt(process.env.PORT) || 3000);
 }
 bootstrap();
