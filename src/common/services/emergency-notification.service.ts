@@ -2,14 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
+import { EmailNotificationService } from './email-notification.service';
+import { WhatsAppNotificationService } from './whatsapp-notification.service';
 
 export interface NotificationContact {
   id: number;
   name: string;
   phone: string;
   email?: string;
-  fcmToken?: string; // Para Firebase Cloud Messaging (Android)
-  apnsToken?: string; // Para Apple Push Notification Service (iOS)
+  fcmToken?: string;
+  apnsToken?: string;
 }
 
 export interface EmergencyAlertData {
@@ -35,167 +37,136 @@ export interface EmergencyAlertData {
 export class EmergencyNotificationService {
   private readonly logger = new Logger(EmergencyNotificationService.name);
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly emailService: EmailNotificationService,
+    private readonly whatsAppService: WhatsAppNotificationService,
+  ) {
     this.initializeFirebase();
   }
 
-  /**
-   * Inicializar Firebase Admin SDK
-   */
+  // ── Firebase ────────────────────────────────────────────────────────────────
+
   private initializeFirebase() {
     try {
-      // Verificar si Firebase ya está inicializado
       if (!admin.apps.length) {
-        const pathToSecret = process.env.PATH_TO_SECRET || this.configService.get<string>('PATH_TO_SECRET');
+        const pathToSecret =
+          process.env.PATH_TO_SECRET ||
+          this.configService.get<string>('PATH_TO_SECRET');
+
         if (!pathToSecret || !fs.existsSync(pathToSecret)) {
-          this.logger.error('❌ No se encontró el archivo de credenciales de Firebase. Verifica PATH_TO_SECRET en tu .env');
+          this.logger.warn(
+            '⚠️ Credenciales Firebase no encontradas. Push notifications desactivadas.',
+          );
           return;
         }
-        const serviceAccount = JSON.parse(fs.readFileSync(pathToSecret, 'utf8'));
 
+        const serviceAccount = JSON.parse(fs.readFileSync(pathToSecret, 'utf8'));
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
-          projectId: serviceAccount.project_id
+          projectId: serviceAccount.project_id,
         });
 
-        this.logger.log('✅ Firebase Admin SDK inicializado correctamente');
+        this.logger.log('✅ Firebase Admin SDK inicializado');
       }
     } catch (error) {
-      this.logger.error('❌ Error inicializando Firebase Admin SDK:', error);
+      this.logger.error('❌ Error inicializando Firebase:', error);
     }
   }
 
+  // ── Punto de entrada principal ───────────────────────────────────────────────
+
   /**
-   * Enviar notificación de emergencia por todos los canales disponibles
+   * Envía notificaciones de emergencia por todos los canales disponibles:
+   * Email, WhatsApp, FCM (push), WebSocket (manejado por gateway).
    */
   async sendEmergencyNotification(
     contact: NotificationContact,
     alertData: EmergencyAlertData,
   ): Promise<void> {
-    const promises: Promise<any>[] = [];
+    this.logger.log(
+      `🔔 Notificando a ${contact.name} por alerta ${alertData.id}...`,
+    );
 
-    // 1. WebSocket (ya implementado en NotificationsGateway)
-    // Esta se maneja por separado en el gateway
+    const tasks: Promise<void>[] = [];
 
-    // 2. SMS (implementación futura)
-    if (contact.phone) {
-      promises.push(this.sendEmergencySMS(contact, alertData));
-    }
-
-    // 3. Email (implementación futura)
+    // 1. Email
     if (contact.email) {
-      promises.push(this.sendEmergencyEmail(contact, alertData));
+      tasks.push(this.emailService.sendEmergencyEmail(contact, alertData));
     }
 
-    // 4. Push Notification Android (implementación futura)
+    // 2. WhatsApp
+    if (contact.phone) {
+      tasks.push(this.whatsAppService.sendEmergencyMessage(contact, alertData));
+    }
+
+    // 3. Push Notification (FCM)
     if (contact.fcmToken) {
-      promises.push(this.sendFirebaseNotification(contact, alertData));
+      tasks.push(this.sendFirebaseNotification(contact, alertData));
     }
 
-    // 5. Push Notification iOS (implementación futura)
+    // 4. APNs (futuro)
     if (contact.apnsToken) {
-      promises.push(this.sendAPNSNotification(contact, alertData));
+      tasks.push(this.sendAPNSNotification(contact, alertData));
     }
 
-    // Ejecutar todas las notificaciones en paralelo
-    try {
-      await Promise.allSettled(promises);
-      this.logger.log(
-        `Notificaciones enviadas a contacto ${contact.name} para alerta ${alertData.id}`,
+    const results = await Promise.allSettled(tasks);
+
+    const failures = results
+      .filter((r) => r.status === 'rejected')
+      .map((r: PromiseRejectedResult) => r.reason?.message ?? r.reason);
+
+    if (failures.length > 0) {
+      this.logger.warn(
+        `⚠️ ${failures.length} canal(es) fallaron para ${contact.name}: ${failures.join('; ')}`,
       );
-    } catch (error) {
-      this.logger.error(
-        `Error enviando notificaciones a contacto ${contact.name}:`,
-        error,
-      );
+    } else {
+      this.logger.log(`✅ Todas las notificaciones enviadas a ${contact.name}`);
     }
   }
 
   /**
-   * Enviar SMS de emergencia (implementación futura)
+   * Fase 2: Envía notificaciones de que el video de la emergencia ya está listo.
    */
-  private async sendEmergencySMS(
+  async sendVideoReadyNotification(
     contact: NotificationContact,
     alertData: EmergencyAlertData,
   ): Promise<void> {
-    try {
-      // TODO: Implementar con Twilio o servicio SMS similar
-      const message = `🚨 ALERTA DE EMERGENCIA 🚨
-${alertData.user.name} ha activado el botón de pánico.
-Ubicación: ${alertData.location || 'No disponible'}
-Hora: ${alertData.createdAt.toLocaleString()}
-Responda inmediatamente.`;
+    this.logger.log(`📹 Notificando a ${contact.name} que el video de la alerta ${alertData.id} está listo...`);
 
-      this.logger.log(`SMS enviado a ${contact.phone}: ${message}`);
-      
-      // Implementación futura:
-      // const twilio = require('twilio');
-      // const client = twilio(
-      //   this.configService.get('TWILIO_ACCOUNT_SID'),
-      //   this.configService.get('TWILIO_AUTH_TOKEN')
-      // );
-      // await client.messages.create({
-      //   body: message,
-      //   from: this.configService.get('TWILIO_PHONE_NUMBER'),
-      //   to: contact.phone
-      // });
-    } catch (error) {
-      this.logger.error(`Error enviando SMS a ${contact.phone}:`, error);
+    const tasks: Promise<void>[] = [];
+
+    if (contact.email) {
+      tasks.push(this.emailService.sendVideoReadyEmail(contact, alertData));
+    }
+
+    if (contact.phone) {
+      tasks.push(this.whatsAppService.sendVideoReadyMessage(contact, alertData));
+    }
+
+    // Opcionalmente se podría enviar otro push (FCM) aquí,
+    // pero usualmente email y WhatsApp bastan para la evidencia en diferido.
+
+    const results = await Promise.allSettled(tasks);
+
+    const failures = results
+      .filter((r) => r.status === 'rejected')
+      .map((r: PromiseRejectedResult) => r.reason?.message ?? r.reason);
+
+    if (failures.length > 0) {
+      this.logger.warn(`⚠️ ${failures.length} canal(es) fallaron al enviar video a ${contact.name}: ${failures.join('; ')}`);
+    } else {
+      this.logger.log(`✅ Notificaciones de video listo enviadas a ${contact.name}`);
     }
   }
 
-  /**
-   * Enviar Email de emergencia (implementación futura)
-   */
-  private async sendEmergencyEmail(
-    contact: NotificationContact,
-    alertData: EmergencyAlertData,
-  ): Promise<void> {
-    try {
-      // TODO: Implementar con Nodemailer o servicio email similar
-      const subject = '🚨 ALERTA DE EMERGENCIA';
-      const html = `
-        <h2>🚨 ALERTA DE EMERGENCIA 🚨</h2>
-        <p><strong>${alertData.user.name}</strong> ha activado el botón de pánico.</p>
-        <p><strong>Ubicación:</strong> ${alertData.location || 'No disponible'}</p>
-        <p><strong>Hora:</strong> ${alertData.createdAt.toLocaleString()}</p>
-        ${alertData.videoUrl ? `<p><strong>Video:</strong> <a href="${alertData.videoUrl}">Ver video</a></p>` : ''}
-        <p>Responda inmediatamente.</p>
-      `;
+  // ── Firebase Cloud Messaging ─────────────────────────────────────────────────
 
-      this.logger.log(`Email enviado a ${contact.email}: ${subject}`);
-      
-      // Implementación futura:
-      // const nodemailer = require('nodemailer');
-      // const transporter = nodemailer.createTransporter({
-      //   host: this.configService.get('SMTP_HOST'),
-      //   port: this.configService.get('SMTP_PORT'),
-      //   secure: false,
-      //   auth: {
-      //     user: this.configService.get('SMTP_USER'),
-      //     pass: this.configService.get('SMTP_PASS')
-      //   }
-      // });
-      // await transporter.sendMail({
-      //   from: this.configService.get('SMTP_USER'),
-      //   to: contact.email,
-      //   subject,
-      //   html
-      // });
-    } catch (error) {
-      this.logger.error(`Error enviando email a ${contact.email}:`, error);
-    }
-  }
-
-  /**
-   * Enviar notificación Firebase (Android/iOS) - Integrado con sistema existente
-   */
   private async sendFirebaseNotification(
     contact: NotificationContact,
     alertData: EmergencyAlertData,
   ): Promise<void> {
     try {
-      // Usar la misma configuración que ya tienes para incidentes
       const message: admin.messaging.TokenMessage = {
         token: contact.fcmToken,
         notification: {
@@ -207,17 +178,14 @@ Responda inmediatamente.`;
           alertId: alertData.id.toString(),
           userId: alertData.user.id.toString(),
           userName: alertData.user.name,
-          description: alertData.description || '',
-          videoUrl: alertData.videoUrl || '',
-          audioUrl: alertData.audioUrl || '',
-          location: alertData.location || '',
-          latitude: alertData.latitude?.toString() || '',
-          longitude: alertData.longitude?.toString() || '',
+          description: alertData.description ?? '',
+          videoUrl: alertData.videoUrl ?? '',
+          audioUrl: alertData.audioUrl ?? '',
+          location: alertData.location ?? '',
+          latitude: alertData.latitude?.toString() ?? '',
+          longitude: alertData.longitude?.toString() ?? '',
           duration: alertData.duration.toString(),
-          timestamp: alertData.createdAt.toISOString(),
-          // Campos compatibles con tu sistema de incidentes
-          latitud: alertData.latitude?.toString() || '',
-          longitud: alertData.longitude?.toString() || '',
+          timestamp: new Date(alertData.createdAt).toISOString(),
         },
         android: {
           priority: 'high',
@@ -227,7 +195,6 @@ Responda inmediatamente.`;
             priority: 'high',
             defaultSound: true,
             defaultVibrateTimings: true,
-            defaultLightSettings: true,
           },
         },
         apns: {
@@ -236,88 +203,41 @@ Responda inmediatamente.`;
               sound: 'emergency_sound.wav',
               badge: 1,
               'content-available': 1,
-              priority: 'high',
             },
           },
         },
       };
 
-      // Usar Firebase Admin SDK con tu Service Account
-      try {
-        const messaging = admin.messaging();
-        const result = await messaging.send(message);
-        
-        this.logger.log(`✅ FCM enviado a ${contact.fcmToken}: ${result}`);
-      } catch (error) {
-        this.logger.error(`❌ Error enviando FCM a ${contact.fcmToken}:`, error);
-        throw error;
-      }
+      const result = await admin.messaging().send(message);
+      this.logger.log(`✅ FCM enviado a ${contact.name} | ${result}`);
     } catch (error) {
-      this.logger.error(`Error enviando FCM a ${contact.fcmToken}:`, error);
+      this.logger.error(`❌ FCM fallido para ${contact.name}: ${error.message}`);
     }
   }
 
-  /**
-   * Enviar notificación APNs (iOS) (implementación futura)
-   */
+  // ── APNs (futuro) ────────────────────────────────────────────────────────────
+
   private async sendAPNSNotification(
     contact: NotificationContact,
-    alertData: EmergencyAlertData,
+    _alertData: EmergencyAlertData,
   ): Promise<void> {
-    try {
-      // TODO: Implementar con APNs
-      const notification = {
-        alert: {
-          title: '🚨 Alerta de Emergencia',
-          body: `${alertData.user.name} ha activado el botón de pánico`,
-        },
-        topic: 'com.yourapp.emergency',
-        payload: {
-          alertId: alertData.id,
-          videoUrl: alertData.videoUrl,
-          location: alertData.location,
-          latitude: alertData.latitude,
-          longitude: alertData.longitude,
-        },
-        sound: 'emergency_sound.wav',
-        badge: 1,
-        'content-available': 1,
-      };
-
-      this.logger.log(`APNs enviado a ${contact.apnsToken}`);
-      
-      // Implementación futura:
-      // const apn = require('apn');
-      // const provider = new apn.Provider({
-      //   token: {
-      //     key: this.configService.get('APNS_PRIVATE_KEY'),
-      //     keyId: this.configService.get('APNS_KEY_ID'),
-      //     teamId: this.configService.get('APNS_TEAM_ID')
-      //   },
-      //   production: false
-      // });
-      // const apnNotification = new apn.Notification();
-      // Object.assign(apnNotification, notification);
-      // await provider.send(apnNotification, contact.apnsToken);
-    } catch (error) {
-      this.logger.error(`Error enviando APNs a ${contact.apnsToken}:`, error);
-    }
+    // TODO: Implementar con el paquete `apn` cuando se requiera soporte iOS nativo
+    this.logger.warn(`⚠️ APNs aún no implementado para ${contact.name}`);
   }
 
-  /**
-   * Verificar configuración de servicios de notificación
-   */
+  // ── Estado de servicios ──────────────────────────────────────────────────────
+
   async checkNotificationServices(): Promise<{
-    sms: boolean;
     email: boolean;
+    whatsapp: boolean;
     fcm: boolean;
     apns: boolean;
   }> {
     return {
-      sms: !!this.configService.get('TWILIO_ACCOUNT_SID'),
-      email: !!this.configService.get('SMTP_HOST'),
-      fcm: true, // Firebase Admin SDK configurado con Service Account
+      email: this.emailService.isAvailable(),
+      whatsapp: this.whatsAppService.isAvailable(),
+      fcm: admin.apps.length > 0,
       apns: !!this.configService.get('APNS_KEY_ID'),
     };
   }
-} 
+}
