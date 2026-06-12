@@ -3,6 +3,7 @@
 /node_modules
 /build
 .env
+notificaciones-abogado-firebase-adminsdk-fbsvc-0617d43325.json
 /secrets/key.json
 # Logs
 logs

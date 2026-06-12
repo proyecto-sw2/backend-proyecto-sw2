@@ -93,20 +93,15 @@ export class EmergencyService {
   async createEmergencyAlert(
     userId: number,
     createEmergencyAlertDto: CreateEmergencyAlertDto,
-    videoFile?: Express.Multer.File,
     audioFile?: Express.Multer.File,
   ): Promise<EmergencyAlert> {
-    let videoUrl: string | undefined;
     let audioUrl: string | undefined;
-    let duration = 0;
 
-    // Subir archivos a S3 si se proporcionan
-    if (videoFile) {
-      videoUrl = await this.awsS3Service.uploadFile(videoFile, 'emergency-videos');
-      // Aquí podrías extraer la duración del video si es necesario
-      duration = 300; // 5 minutos por defecto
-    }
+    // Extraer duración del metadata si viene del cliente (grabación offline)
+    const metaData = createEmergencyAlertDto.metadata as any;
+    let duration = metaData?.recordingDuration ?? 0;
 
+    // Phase 1 no sube video, solo audio opcional
     if (audioFile) {
       audioUrl = await this.awsS3Service.uploadFile(audioFile, 'emergency-audio');
     }
@@ -114,7 +109,6 @@ export class EmergencyService {
     const alert = this.emergencyAlertRepository.create({
       ...createEmergencyAlertDto,
       userId,
-      videoUrl,
       audioUrl,
       duration,
       type: createEmergencyAlertDto.type || AlertType.PANIC_BUTTON,
@@ -122,8 +116,34 @@ export class EmergencyService {
 
     const savedAlert = await this.emergencyAlertRepository.save(alert);
 
-    // Notificar a contactos de emergencia
-    await this.notifyEmergencyContacts(userId, savedAlert);
+    // Notificar a contactos de emergencia (Fase 1 - sin video)
+    await this.notifyEmergencyContacts(userId, savedAlert, 'phase1');
+
+    return savedAlert;
+  }
+
+  // ===== FASE 2: SUBIDA DE VIDEO =====
+
+  async attachVideoToAlert(
+    id: number,
+    userId: number,
+    videoFile: Express.Multer.File,
+  ): Promise<EmergencyAlert> {
+    const alert = await this.findOneEmergencyAlert(id, userId);
+
+    if (!videoFile) {
+      throw new BadRequestException('El archivo de video es requerido');
+    }
+
+    // Subir archivo a S3
+    const videoUrl = await this.awsS3Service.uploadFile(videoFile, 'emergency-videos');
+
+    // Actualizar registro
+    alert.videoUrl = videoUrl;
+    const savedAlert = await this.emergencyAlertRepository.save(alert);
+
+    // Notificar que la evidencia está lista (Fase 2)
+    await this.notifyEmergencyContacts(userId, savedAlert, 'phase2');
 
     return savedAlert;
   }
@@ -177,7 +197,11 @@ export class EmergencyService {
 
   // ===== NOTIFICACIONES A CONTACTOS =====
 
-  private async notifyEmergencyContacts(userId: number, alert: EmergencyAlert): Promise<void> {
+  private async notifyEmergencyContacts(
+    userId: number,
+    alert: EmergencyAlert,
+    phase: 'phase1' | 'phase2' = 'phase1',
+  ): Promise<void> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     const contacts = await this.findAllEmergencyContacts(userId);
 
@@ -185,44 +209,61 @@ export class EmergencyService {
       return;
     }
 
-    // Enviar notificación a cada contacto por múltiples canales
     for (const contact of contacts) {
-      // 1. WebSocket (tiempo real)
-      await this.notificationsGateway.notificarAlertaEmergencia(
-        contact,
-        user,
-        alert,
-      );
+      if (phase === 'phase1') {
+        // 1. WebSocket (tiempo real)
+        await this.notificationsGateway.notificarAlertaEmergencia(
+          contact,
+          user,
+          alert,
+        );
 
-      // 2. Otros canales (SMS, Email, Push) - implementación futura
-      await this.emergencyNotificationService.sendEmergencyNotification(
-        {
-          id: contact.id,
-          name: contact.name,
-          phone: contact.phone,
-          email: contact.email,
-          fcmToken: contact.fcmToken,
-          // apnsToken se agregaría en el futuro si es necesario
-        },
-        {
-          id: alert.id,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
+        // 2. Email / WhatsApp / FCM (Aviso inmediato sin video)
+        await this.emergencyNotificationService.sendEmergencyNotification(
+          {
+            id: contact.id,
+            name: contact.name,
+            phone: contact.phone,
+            email: contact.email,
+            fcmToken: contact.fcmToken,
           },
-          type: alert.type,
-          description: alert.description,
-          location: alert.location,
-          latitude: alert.latitude,
-          longitude: alert.longitude,
-          videoUrl: alert.videoUrl,
-          audioUrl: alert.audioUrl,
-          duration: alert.duration,
-          metadata: alert.metadata,
-          createdAt: alert.createdAt,
-        },
-      );
+          {
+            id: alert.id,
+            user: { id: user.id, name: user.name, email: user.email },
+            type: alert.type,
+            description: alert.description,
+            location: alert.location,
+            latitude: alert.latitude,
+            longitude: alert.longitude,
+            videoUrl: alert.videoUrl,
+            audioUrl: alert.audioUrl,
+            duration: alert.duration,
+            metadata: alert.metadata,
+            createdAt: alert.createdAt,
+          },
+        );
+      } else if (phase === 'phase2') {
+        // Enviar solo la actualización de que el video está listo
+        await this.emergencyNotificationService.sendVideoReadyNotification(
+          {
+            id: contact.id,
+            name: contact.name,
+            phone: contact.phone,
+            email: contact.email,
+          },
+          {
+            id: alert.id,
+            user: { id: user.id, name: user.name, email: user.email },
+            type: alert.type,
+            location: alert.location,
+            latitude: alert.latitude,
+            longitude: alert.longitude,
+            videoUrl: alert.videoUrl,
+            duration: alert.duration,
+            createdAt: alert.createdAt,
+          },
+        );
+      }
     }
   }
 
@@ -267,13 +308,13 @@ export class EmergencyService {
     return {
       services: servicesStatus,
       summary: {
-        websocket: true, // Siempre disponible
-        sms: servicesStatus.sms,
+        websocket: true,
+        whatsapp: servicesStatus.whatsapp,
         email: servicesStatus.email,
         pushAndroid: servicesStatus.fcm,
         pushIOS: servicesStatus.apns,
       },
-      message: 'WebSocket siempre disponible. Otros servicios requieren configuración adicional.',
+      message: 'WebSocket siempre disponible. Email y WhatsApp configurados.',
     };
   }
 } 

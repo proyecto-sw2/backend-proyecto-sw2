@@ -13,6 +13,7 @@ import {
   MaxFileSizeValidator,
   FileTypeValidator,
   Query,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
@@ -145,7 +146,7 @@ export class EmergencyController {
     return this.emergencyService.createEmergencyAlert(
       user.id,
       createEmergencyAlertDto,
-      videoFile,
+      undefined, // audio
     );
   }
 
@@ -197,8 +198,105 @@ export class EmergencyController {
     return this.emergencyService.createEmergencyAlert(
       user.id,
       alertData,
-      videoFile,
+      undefined, // audio
     );
+  }
+
+  @Patch('alerts/:id/video')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        video: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('video', {
+      limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB
+      },
+    }),
+  )
+  async attachVideoToAlert(
+    @ActiveUser() user: UserActiveInterface,
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 50 * 1024 * 1024 }), // 50MB
+          new FileTypeValidator({ fileType: 'video/*' }),
+        ],
+        fileIsRequired: true,
+      }),
+    )
+    videoFile: Express.Multer.File,
+  ): Promise<EmergencyAlertResponseDto> {
+    return this.emergencyService.attachVideoToAlert(id, user.id, videoFile);
+  }
+
+  /**
+   * Endpoint para sincronizar alertas generadas sin internet (offline-first).
+   * Misma lógica que panic-button pero acepta el campo `offlineTimestamp`
+   * para preservar la hora real de la emergencia.
+   */
+  @Post('alerts/sync')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string' },
+        latitude: { type: 'number' },
+        longitude: { type: 'number' },
+        location: { type: 'string' },
+        offlineTimestamp: { type: 'string', description: 'ISO timestamp de cuando ocurrió la emergencia' },
+        metadata: { type: 'string' },
+        video: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('video', {
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  async syncOfflineAlert(
+    @ActiveUser() user: UserActiveInterface,
+    @Body() body: CreateEmergencyAlertDto & { offlineTimestamp?: string },
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 50 * 1024 * 1024 }),
+          new FileTypeValidator({ fileType: 'video/*' }),
+        ],
+        fileIsRequired: false,
+      }),
+    )
+    videoFile?: Express.Multer.File,
+  ): Promise<EmergencyAlertResponseDto> {
+    // Marcar en metadata que es una sincronización offline
+    const metadata = {
+      ...(typeof body.metadata === 'string' ? JSON.parse(body.metadata || '{}') : (body.metadata ?? {})),
+      offlineSync: true,
+      offlineTimestamp: body.offlineTimestamp,
+    };
+
+    const alertData: CreateEmergencyAlertDto = {
+      ...body,
+      type: 'panic_button' as any,
+      metadata,
+    };
+
+    const savedAlert = await this.emergencyService.createEmergencyAlert(user.id, alertData, undefined);
+    if (videoFile) {
+      return this.emergencyService.attachVideoToAlert(savedAlert.id, user.id, videoFile);
+    }
+    return savedAlert;
   }
 
   @Get('alerts')

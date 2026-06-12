@@ -2378,6 +2378,13 @@
   dependencies:
     undici-types "~6.21.0"
 
+"@types/nodemailer@^8.0.0":
+  version "8.0.0"
+  resolved "https://registry.yarnpkg.com/@types/nodemailer/-/nodemailer-8.0.0.tgz#ea189a9c151c04cc65c8a2a4c668c65d952a24e2"
+  integrity sha512-fyf8jWULsCo0d0BuoQ75i6IeoHs47qcqxWc7yUdUcV0pOZGjUTTOvwdG1PRXUDqN/8A64yQdQdnA2pZgcdi+cA==
+  dependencies:
+    "@types/node" "*"
+
 "@types/passport-jwt@^4.0.1":
   version "4.0.1"
   resolved "https://registry.npmjs.org/@types/passport-jwt/-/passport-jwt-4.0.1.tgz"
@@ -3643,7 +3650,7 @@ diff@^4.0.1:
     bcryptjs "2.4.3"
     class-transformer "0.5.1"
     class-validator "0.14.1"
-    dj-mix "file:C:/Users/Administrador/AppData/Local/Yarn/Cache/v6/npm-dj-mix-0.0.1-13e1a14c-fb9e-4fbb-a3e4-a5dac068f296-1773757936222/node_modules/dj-mix"
+    dj-mix "file:C:/Users/Administrador/AppData/Local/Yarn/Cache/v6/npm-dj-mix-0.0.1-7dd03c33-af65-4a16-857f-dc99c8f69341-1779671288861/node_modules/dj-mix"
     dotenv "^16.4.5"
     firebase-admin "^13.4.0"
     multer "^2.0.1"
@@ -5857,6 +5864,11 @@ node-releases@^2.0.18:
   version "2.0.18"
   resolved "https://registry.npmjs.org/node-releases/-/node-releases-2.0.18.tgz"
   integrity sha512-d9VeXT4SJ7ZeOqGX6R5EM022wpL+eWPooLI+5UpWn2jCT1aosUQEhQP214x33Wkwx3JQMvIm+tIoVOdodFS40g==
+
+nodemailer@^8.0.8:
+  version "8.0.8"
+  resolved "https://registry.yarnpkg.com/nodemailer/-/nodemailer-8.0.8.tgz#23ff12bebfaed142fbf126c4db3a7a8ed68be031"
+  integrity sha512-p+XsnzXGdtIHXUu2ugxdfG+eX2nehsGhMjW9h0CWj1BhE30hrFz0kh0yIM0/VjUgVsRrDj+80ZO+I1nSkGE4tA==
 
 normalize-path@^3.0.0, normalize-path@~3.0.0:
   version "3.0.0"

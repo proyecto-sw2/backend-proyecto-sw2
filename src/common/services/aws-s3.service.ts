@@ -38,7 +38,6 @@ export class AwsS3Service {
         Key: fileName,
         Body: file.buffer,
         ContentType: file.mimetype,
-        ACL: 'public-read', // Para que sea accesible públicamente
       });
 
       await this.s3Client.send(command);
