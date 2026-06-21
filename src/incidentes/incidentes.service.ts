@@ -1,5 +1,5 @@
 // src/incidentes/incidentes.service.ts
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateIncidenteDto } from './dto/create-incidente.dto';
@@ -7,14 +7,18 @@ import { UpdateIncidenteDto } from './dto/update-incidente.dto';
 import { IncidenteResponseDto } from './dto/incidente-response.dto';
 import { IncidenteMapaEntity } from './entities/incidente.entity';
 import { User } from '../users/entities/user.entity';
+import { BlockchainService } from '../blockchain/blockchain.service';
 
 @Injectable()
 export class IncidentesService {
+  private readonly logger = new Logger(IncidentesService.name);
+
   constructor(
     @InjectRepository(IncidenteMapaEntity)
     private readonly incidenteRepo: Repository<IncidenteMapaEntity>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly blockchainService: BlockchainService,
   ) {}
 
   async create(dto: CreateIncidenteDto, usuarioId: number): Promise<IncidenteResponseDto> {
@@ -43,6 +47,11 @@ export class IncidentesService {
 
     const incidenteGuardado = await this.incidenteRepo.save(nuevoIncidente);
     console.log('🔵 create() - Incidente guardado en BD con ID:', incidenteGuardado.id_incidente);
+
+    // Registro blockchain async — no bloquea la respuesta al cliente
+    this.registrarEnBlockchain(incidenteGuardado).catch((err) =>
+      this.logger.error(`Blockchain registro fallido para incidente ${incidenteGuardado.id_incidente}: ${err.message}`),
+    );
 
     return this.mapearAResponse(incidenteGuardado);
   }
@@ -218,6 +227,31 @@ export class IncidentesService {
     console.log('🗑️ remove() - Incidente eliminado exitosamente');
   }
 
+  private async registrarEnBlockchain(incidente: IncidenteMapaEntity): Promise<void> {
+    if (!this.blockchainService.disponible) return;
+
+    const contenido = JSON.stringify({
+      id: incidente.id_incidente,
+      tipo: incidente.tipo_incidente,
+      descripcion: incidente.descripcion,
+      latitud_longitud: incidente.latitud_longitud,
+      fecha: incidente.fecha_incidente,
+    });
+
+    try {
+      await this.incidenteRepo.update(incidente.id_incidente, { blockchain_status: 'pendiente' });
+      const resultado = await this.blockchainService.firmar(contenido, 'INCIDENTE');
+      await this.incidenteRepo.update(incidente.id_incidente, {
+        doc_hash: resultado.hash,
+        tx_hash: resultado.txHash,
+        blockchain_status: 'confirmado',
+      });
+      this.logger.log(`Incidente ${incidente.id_incidente} registrado en Sepolia: ${resultado.txHash}`);
+    } catch {
+      await this.incidenteRepo.update(incidente.id_incidente, { blockchain_status: 'fallido' });
+    }
+  }
+
   private mapearAResponse(incidente: IncidenteMapaEntity, incluirPublicaciones: boolean = false): IncidenteResponseDto {
     const response: IncidenteResponseDto = {
       id_incidente: incidente.id_incidente,
@@ -231,6 +265,9 @@ export class IncidentesService {
         email: incidente.usuario.email,
       },
       total_publicaciones: incidente.publicaciones?.length || 0,
+      doc_hash: incidente.doc_hash ?? null,
+      tx_hash: incidente.tx_hash ?? null,
+      blockchain_status: incidente.blockchain_status ?? 'sin_registro',
     };
 
     // Incluir publicaciones si se solicita

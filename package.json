@@ -44,6 +44,7 @@
     "class-validator": "0.14.1",
     "dj-mix": "file:",
     "dotenv": "^16.4.5",
+    "ethers": "^6.16.0",
     "firebase-admin": "^13.4.0",
     "multer": "^2.0.1",
     "nodemailer": "^8.0.8",

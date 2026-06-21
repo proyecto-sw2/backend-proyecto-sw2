@@ -10,11 +10,13 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
 import { EmergencyNotificationService } from 'src/common/services/emergency-notification.service';
 import { EmailNotificationService } from 'src/common/services/email-notification.service';
 import { WhatsAppNotificationService } from 'src/common/services/whatsapp-notification.service';
+import { BlockchainModule } from 'src/blockchain/blockchain.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([EmergencyContact, EmergencyAlert, User]),
     NotificationsModule,
+    BlockchainModule,
   ],
   controllers: [EmergencyController],
   providers: [

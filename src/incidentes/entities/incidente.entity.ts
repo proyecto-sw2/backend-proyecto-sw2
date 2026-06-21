@@ -31,6 +31,15 @@ export class IncidenteMapaEntity {
   @CreateDateColumn()
   fecha_incidente: Date;
 
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  doc_hash: string; // SHA-256 del contenido del incidente
+
+  @Column({ type: 'varchar', length: 66, nullable: true })
+  tx_hash: string; // Hash de la transacción en Sepolia (0x…)
+
+  @Column({ type: 'varchar', length: 20, default: 'sin_registro', nullable: true })
+  blockchain_status: string; // 'sin_registro' | 'pendiente' | 'confirmado' | 'fallido'
+
   // Relación con publicaciones (un incidente puede tener múltiples publicaciones)
   @OneToMany(() => PublicacionEntity, (publicacion) => publicacion.incidente)
   publicaciones: PublicacionEntity[];
