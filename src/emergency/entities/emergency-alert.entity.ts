@@ -64,6 +64,15 @@ export class EmergencyAlert {
   @Column({ type: 'jsonb', nullable: true })
   metadata: any; // Información adicional como acelerómetro, etc.
 
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  doc_hash: string; // SHA-256 de los metadatos de la evidencia
+
+  @Column({ type: 'varchar', length: 66, nullable: true })
+  tx_hash: string; // Hash de la transacción en Sepolia (0x…)
+
+  @Column({ type: 'varchar', length: 20, default: 'sin_registro', nullable: true })
+  blockchain_status: string; // 'sin_registro' | 'pendiente' | 'confirmado' | 'fallido'
+
   @Column({ type: 'timestamp', nullable: true })
   resolvedAt: Date;
 

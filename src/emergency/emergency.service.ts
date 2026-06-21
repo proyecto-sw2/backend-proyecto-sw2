@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -15,9 +16,12 @@ import { AwsS3Service } from 'src/common/services/aws-s3.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { EmergencyNotificationService } from 'src/common/services/emergency-notification.service';
 import { User } from 'src/users/entities/user.entity';
+import { BlockchainService } from 'src/blockchain/blockchain.service';
 
 @Injectable()
 export class EmergencyService {
+  private readonly logger = new Logger(EmergencyService.name);
+
   constructor(
     @InjectRepository(EmergencyContact)
     private emergencyContactRepository: Repository<EmergencyContact>,
@@ -28,6 +32,7 @@ export class EmergencyService {
     private awsS3Service: AwsS3Service,
     private notificationsGateway: NotificationsGateway,
     private emergencyNotificationService: EmergencyNotificationService,
+    private readonly blockchainService: BlockchainService,
   ) {}
 
   // ===== CONTACTOS DE EMERGENCIA =====
@@ -94,14 +99,13 @@ export class EmergencyService {
     userId: number,
     createEmergencyAlertDto: CreateEmergencyAlertDto,
     audioFile?: Express.Multer.File,
+    skipNotifications = false,
   ): Promise<EmergencyAlert> {
     let audioUrl: string | undefined;
 
-    // Extraer duración del metadata si viene del cliente (grabación offline)
     const metaData = createEmergencyAlertDto.metadata as any;
     let duration = metaData?.recordingDuration ?? 0;
 
-    // Phase 1 no sube video, solo audio opcional
     if (audioFile) {
       audioUrl = await this.awsS3Service.uploadFile(audioFile, 'emergency-audio');
     }
@@ -116,8 +120,10 @@ export class EmergencyService {
 
     const savedAlert = await this.emergencyAlertRepository.save(alert);
 
-    // Notificar a contactos de emergencia (Fase 1 - sin video)
-    await this.notifyEmergencyContacts(userId, savedAlert, 'phase1');
+    // Las alertas offline (offlineSync) no reenvían notificaciones — la emergencia ya pasó
+    if (!skipNotifications) {
+      await this.notifyEmergencyContacts(userId, savedAlert, 'phase1');
+    }
 
     return savedAlert;
   }
@@ -141,6 +147,11 @@ export class EmergencyService {
     // Actualizar registro
     alert.videoUrl = videoUrl;
     const savedAlert = await this.emergencyAlertRepository.save(alert);
+
+    // Registro blockchain async — no bloquea la respuesta al cliente
+    this.registrarEvidenciaEnBlockchain(savedAlert).catch((err) =>
+      this.logger.error(`Blockchain registro fallido para alerta ${savedAlert.id}: ${err.message}`),
+    );
 
     // Notificar que la evidencia está lista (Fase 2)
     await this.notifyEmergencyContacts(userId, savedAlert, 'phase2');
@@ -193,6 +204,38 @@ export class EmergencyService {
     alert.resolutionNotes = resolutionNotes;
 
     return this.emergencyAlertRepository.save(alert);
+  }
+
+  // ===== REGISTRO BLOCKCHAIN =====
+
+  private async registrarEvidenciaEnBlockchain(alert: EmergencyAlert): Promise<void> {
+    if (!this.blockchainService.disponible) return;
+
+    // Metadatos de la evidencia: hash S3 URL + GPS + timestamp (HU24)
+    const contenido = JSON.stringify({
+      alertId: alert.id,
+      userId: alert.userId,
+      videoUrl: alert.videoUrl,
+      audioUrl: alert.audioUrl,
+      latitude: alert.latitude,
+      longitude: alert.longitude,
+      location: alert.location,
+      type: alert.type,
+      createdAt: alert.createdAt,
+    });
+
+    try {
+      await this.emergencyAlertRepository.update(alert.id, { blockchain_status: 'pendiente' });
+      const resultado = await this.blockchainService.firmar(contenido, 'EMERGENCIA');
+      await this.emergencyAlertRepository.update(alert.id, {
+        doc_hash: resultado.hash,
+        tx_hash: resultado.txHash,
+        blockchain_status: 'confirmado',
+      });
+      this.logger.log(`Alerta ${alert.id} registrada en Sepolia: ${resultado.txHash}`);
+    } catch {
+      await this.emergencyAlertRepository.update(alert.id, { blockchain_status: 'fallido' });
+    }
   }
 
   // ===== NOTIFICACIONES A CONTACTOS =====

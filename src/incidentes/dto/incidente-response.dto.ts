@@ -10,5 +10,8 @@ export class IncidenteResponseDto {
     email: string;
   };
   total_publicaciones?: number;
-  publicaciones?: any[]; // Para cuando se incluyan las publicaciones relacionadas
+  publicaciones?: any[];
+  doc_hash?: string;
+  tx_hash?: string;
+  blockchain_status?: string;
 }

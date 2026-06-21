@@ -13,7 +13,7 @@ import { NotificationsGateway } from './notifications/notifications.gateway';
 import { UploadModule } from './upload/upload.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { EmergencyModule } from './emergency/emergency.module';
-
+import { BlockchainModule } from './blockchain/blockchain.module';
 
 @Module({
   imports: [
@@ -46,7 +46,8 @@ import { EmergencyModule } from './emergency/emergency.module';
     ComentariosModule,
     UploadModule,
     NotificationsModule,
-    EmergencyModule
+    EmergencyModule,
+    BlockchainModule,
   ],
   controllers: [AppController],
   providers: [AppService, NotificationsGateway],

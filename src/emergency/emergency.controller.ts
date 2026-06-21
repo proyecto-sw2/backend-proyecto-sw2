@@ -292,7 +292,8 @@ export class EmergencyController {
       metadata,
     };
 
-    const savedAlert = await this.emergencyService.createEmergencyAlert(user.id, alertData, undefined);
+    // skipNotifications=true: la emergencia ya ocurrió offline, no reenviar alertas
+    const savedAlert = await this.emergencyService.createEmergencyAlert(user.id, alertData, undefined, true);
     if (videoFile) {
       return this.emergencyService.attachVideoToAlert(savedAlert.id, user.id, videoFile);
     }
