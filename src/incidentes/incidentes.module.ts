@@ -5,6 +5,7 @@ import { IncidentesController } from './incidentes.controller';
 import { PublicIncidentesController } from './public-incidentes.controller';
 import { CertificadoService } from './certificado.service';
 import { IncidenteMapaEntity } from './entities/incidente.entity';
+import { EmergencyAlert } from '../emergency/entities/emergency-alert.entity';
 import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
@@ -13,7 +14,7 @@ import { UploadModule } from '../upload/upload.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([IncidenteMapaEntity, User]),
+    TypeOrmModule.forFeature([IncidenteMapaEntity, User, EmergencyAlert]),
     AuthModule,
     BlockchainModule,
     UploadModule,
