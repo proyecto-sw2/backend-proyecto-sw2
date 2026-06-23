@@ -17,6 +17,8 @@ import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { EmergencyNotificationService } from 'src/common/services/emergency-notification.service';
 import { User } from 'src/users/entities/user.entity';
 import { BlockchainService } from 'src/blockchain/blockchain.service';
+import { CertificadoEmergenciaService } from './certificado-emergencia.service';
+import { createHash } from 'crypto';
 
 @Injectable()
 export class EmergencyService {
@@ -33,6 +35,7 @@ export class EmergencyService {
     private notificationsGateway: NotificationsGateway,
     private emergencyNotificationService: EmergencyNotificationService,
     private readonly blockchainService: BlockchainService,
+    private readonly certificadoEmergenciaService: CertificadoEmergenciaService,
   ) {}
 
   // ===== CONTACTOS DE EMERGENCIA =====
@@ -134,6 +137,8 @@ export class EmergencyService {
     id: number,
     userId: number,
     videoFile: Express.Multer.File,
+    localSignature?: string,
+    publicKey?: string,
   ): Promise<EmergencyAlert> {
     const alert = await this.findOneEmergencyAlert(id, userId);
 
@@ -146,6 +151,21 @@ export class EmergencyService {
 
     // Actualizar registro
     alert.videoUrl = videoUrl;
+
+    if (localSignature && publicKey) {
+      let currentMeta = {};
+      try {
+        currentMeta = alert.metadata ? JSON.parse(alert.metadata) : {};
+      } catch (e) {}
+      
+      currentMeta['local_signature'] = localSignature;
+      currentMeta['public_key'] = publicKey;
+      alert.metadata = JSON.stringify(currentMeta);
+    }
+
+    // Generar SHA-256 del archivo físico
+    const docHash = createHash('sha256').update(videoFile.buffer).digest('hex');
+
     const savedAlert = await this.emergencyAlertRepository.save(alert);
 
     // Registro blockchain async — no bloquea la respuesta al cliente
@@ -160,10 +180,40 @@ export class EmergencyService {
   }
 
   async findAllEmergencyAlerts(userId: number): Promise<EmergencyAlert[]> {
-    return this.emergencyAlertRepository.find({
+    const alerts = await this.emergencyAlertRepository.find({
       where: { userId },
       order: { createdAt: 'DESC' },
     });
+
+    for (const alert of alerts) {
+      if (alert.blockchain_status === 'pendiente' && alert.tx_hash) {
+        try {
+          const status = await this.blockchainService.consultarTransaccion(alert.tx_hash);
+          if (status.estado === 'confirmado' || status.estado === 'fallido') {
+            alert.blockchain_status = status.estado;
+            await this.emergencyAlertRepository.update(alert.id, { blockchain_status: status.estado });
+            
+            // Si se confirmó y no tiene certificado, lo generamos de inmediato
+            if (status.estado === 'confirmado' && !alert.certificado_url) {
+              const { pdf } = await this.certificadoEmergenciaService.generarCertificadoEmergencia(alert.id);
+              if (pdf) {
+                const url = await this.awsS3Service.uploadBuffer(
+                  pdf,
+                  'application/pdf',
+                  'pdf',
+                  'certificados-emergencia'
+                );
+                alert.certificado_url = url;
+                await this.emergencyAlertRepository.update(alert.id, { certificado_url: url });
+              }
+            }
+          }
+        } catch (e) {
+          this.logger.error(`Error consultando estado blockchain para emergencia ${alert.id}: ${e.message}`);
+        }
+      }
+    }
+    return alerts;
   }
 
   async findOneEmergencyAlert(id: number, userId: number): Promise<EmergencyAlert> {
@@ -175,7 +225,62 @@ export class EmergencyService {
       throw new NotFoundException('Alerta de emergencia no encontrada');
     }
 
+    if (alert.blockchain_status === 'pendiente' && alert.tx_hash) {
+      try {
+        const status = await this.blockchainService.consultarTransaccion(alert.tx_hash);
+        if (status.estado === 'confirmado' || status.estado === 'fallido') {
+          alert.blockchain_status = status.estado;
+          await this.emergencyAlertRepository.update(alert.id, { blockchain_status: status.estado });
+          
+          if (status.estado === 'confirmado' && !alert.certificado_url) {
+            const { pdf } = await this.certificadoEmergenciaService.generarCertificadoEmergencia(alert.id);
+            if (pdf) {
+              const url = await this.awsS3Service.uploadBuffer(
+                pdf,
+                'application/pdf',
+                'pdf',
+                'certificados-emergencia'
+              );
+              alert.certificado_url = url;
+              await this.emergencyAlertRepository.update(alert.id, { certificado_url: url });
+            }
+          }
+        }
+      } catch (e) {
+        this.logger.error(`Error consultando estado blockchain para emergencia ${alert.id}: ${e.message}`);
+      }
+    }
+
     return alert;
+  }
+
+  async descargarCertificado(id: number, userId: number) {
+    const emergencia = await this.emergencyAlertRepository.findOne({ where: { id, userId } });
+    if (!emergencia) {
+      throw new NotFoundException('Emergencia no encontrada');
+    }
+
+    if (emergencia.blockchain_status === 'pendiente') {
+      return { status: 'pendiente', message: 'Certificado en proceso. Intente de nuevo más tarde.' };
+    }
+
+    if (emergencia.certificado_url) {
+      return { status: 'confirmado', url: emergencia.certificado_url };
+    }
+
+    const { pdf, status } = await this.certificadoEmergenciaService.generarCertificadoEmergencia(id);
+    if (pdf) {
+      const url = await this.awsS3Service.uploadBuffer(
+        pdf,
+        'application/pdf',
+        'pdf',
+        'certificados-emergencia'
+      );
+      await this.emergencyAlertRepository.update(id, { certificado_url: url });
+      return { status: 'confirmado', url };
+    }
+
+    return { status, message: 'No se pudo generar el certificado' };
   }
 
   async resolveEmergencyAlert(

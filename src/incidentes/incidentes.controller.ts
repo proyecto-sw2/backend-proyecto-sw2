@@ -9,7 +9,10 @@ import {
   Delete,
   Query,
   UseGuards,
+  Res,
+  HttpStatus,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -18,6 +21,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { IncidentesService } from './incidentes.service';
+import { CertificadoService } from './certificado.service';
 import { CreateIncidenteDto } from './dto/create-incidente.dto';
 import { UpdateIncidenteDto } from './dto/update-incidente.dto';
 import { IncidenteResponseDto } from './dto/incidente-response.dto';
@@ -30,7 +34,10 @@ import { UserActiveInterface } from '../common/interfaces/user-active.interface'
 @UseGuards(AuthGuard)
 @Controller('incidentes')
 export class IncidentesController {
-  constructor(private readonly incidentesService: IncidentesService) {}
+  constructor(
+    private readonly incidentesService: IncidentesService,
+    private readonly certificadoService: CertificadoService,
+  ) {}
 
   @Post()
   @ApiOperation({ 
@@ -188,8 +195,49 @@ export class IncidentesController {
     return this.incidentesService.findByArea(lat1, lat2, lng1, lng2);
   }
 
+  @Get(':id/certificado')
+  @ApiOperation({
+    summary: 'Descargar certificado PDF de incidente con QR verificable',
+    description:
+      'Genera y descarga un certificado PDF con los datos del incidente, el txHash y un código QR que enlaza a Etherscan Sepolia. Si el registro blockchain está pendiente, devuelve 202 con un mensaje informativo.',
+  })
+  @ApiResponse({ status: 200, description: 'PDF generado y devuelto como archivo descargable' })
+  @ApiResponse({ status: 202, description: 'Registro blockchain pendiente de confirmación' })
+  @ApiResponse({ status: 400, description: 'Incidente sin registro blockchain confirmado' })
+  @ApiResponse({ status: 404, description: 'Incidente no encontrado' })
+  async descargarCertificado(
+    @Param('id') id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const resultado = await this.certificadoService.generarCertificadoReporte(+id);
+
+    if (resultado.status === 'pendiente') {
+      res.status(HttpStatus.ACCEPTED).json({
+        status: 'pendiente',
+        message: resultado.message,
+      });
+      return;
+    }
+
+    if (resultado.url) {
+      // Redirect to S3 URL directly
+      res.redirect(HttpStatus.FOUND, resultado.url);
+      return;
+    }
+
+    if (resultado.pdf) {
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="certificado-incidente-${id}.pdf"`,
+        'Content-Length': resultado.pdf.length,
+        'Cache-Control': 'no-cache',
+      });
+      res.status(HttpStatus.OK).send(resultado.pdf);
+    }
+  }
+
   @Get(':id')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Obtener incidente específico',
     description: 'Obtiene los detalles de un incidente incluyendo sus publicaciones asociadas'
   })

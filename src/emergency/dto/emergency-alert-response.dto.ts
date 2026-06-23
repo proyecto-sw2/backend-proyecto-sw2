@@ -33,6 +33,18 @@ export class EmergencyAlertResponseDto {
   duration: number;
 
   @ApiPropertyOptional()
+  doc_hash?: string;
+
+  @ApiPropertyOptional()
+  tx_hash?: string;
+
+  @ApiProperty()
+  blockchain_status: string;
+
+  @ApiPropertyOptional()
+  certificado_url?: string;
+
+  @ApiPropertyOptional()
   metadata?: any;
 
   @ApiPropertyOptional()

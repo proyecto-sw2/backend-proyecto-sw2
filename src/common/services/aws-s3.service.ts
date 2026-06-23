@@ -51,6 +51,29 @@ export class AwsS3Service {
   }
 
   /**
+   * Subir buffer a S3
+   */
+  async uploadBuffer(buffer: Buffer, mimetype: string, extension: string, folder: string = 'uploads'): Promise<string> {
+    try {
+      const fileName = `${folder}/${uuidv4()}.${extension}`;
+
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: fileName,
+        Body: buffer,
+        ContentType: mimetype,
+      });
+
+      await this.s3Client.send(command);
+
+      return `https://${this.bucketName}.s3.${this.configService.get('AWS_REGION')}.amazonaws.com/${fileName}`;
+    } catch (error) {
+      console.error('Error subiendo buffer a S3:', error);
+      throw new BadRequestException('Error al subir archivo');
+    }
+  }
+
+  /**
    * Subir múltiples archivos
    */
   async uploadMultipleFiles(files: Express.Multer.File[], folder: string = 'uploads'): Promise<string[]> {
@@ -108,7 +131,8 @@ export class AwsS3Service {
       'image/webp',
       'video/mp4',
       'video/mpeg',
-      'video/quicktime'
+      'video/quicktime',
+      'application/pdf'
     ];
 
     if (!allowedMimeTypes.includes(file.mimetype)) {

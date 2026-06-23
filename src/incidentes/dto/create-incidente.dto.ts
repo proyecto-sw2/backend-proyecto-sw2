@@ -30,7 +30,6 @@ export class CreateIncidenteDto {
   })
   @IsString()
   @IsNotEmpty({ message: 'La descripción del incidente es requerida' })
-  @MinLength(10, { message: 'La descripción debe tener al menos 10 caracteres' })
   @MaxLength(500, { message: 'La descripción no puede exceder 500 caracteres' })
   descripcion: string;
 
