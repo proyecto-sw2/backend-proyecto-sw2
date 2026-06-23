@@ -212,6 +212,8 @@ export class EmergencyController {
           type: 'string',
           format: 'binary',
         },
+        local_signature: { type: 'string' },
+        public_key: { type: 'string' },
       },
     },
   })
@@ -235,8 +237,10 @@ export class EmergencyController {
       }),
     )
     videoFile: Express.Multer.File,
+    @Body('local_signature') localSignature?: string,
+    @Body('public_key') publicKey?: string,
   ): Promise<EmergencyAlertResponseDto> {
-    return this.emergencyService.attachVideoToAlert(id, user.id, videoFile);
+    return this.emergencyService.attachVideoToAlert(id, user.id, videoFile, localSignature, publicKey);
   }
 
   /**
@@ -257,6 +261,8 @@ export class EmergencyController {
         offlineTimestamp: { type: 'string', description: 'ISO timestamp de cuando ocurrió la emergencia' },
         metadata: { type: 'string' },
         video: { type: 'string', format: 'binary' },
+        local_signature: { type: 'string' },
+        public_key: { type: 'string' },
       },
     },
   })
@@ -268,6 +274,9 @@ export class EmergencyController {
   async syncOfflineAlert(
     @ActiveUser() user: UserActiveInterface,
     @Body() body: CreateEmergencyAlertDto & { offlineTimestamp?: string },
+    @Body('metadata') metadataStr?: string,
+    @Body('local_signature') localSignature?: string,
+    @Body('public_key') publicKey?: string,
     @UploadedFile(
       new ParseFilePipe({
         validators: [
@@ -295,7 +304,7 @@ export class EmergencyController {
     // skipNotifications=true: la emergencia ya ocurrió offline, no reenviar alertas
     const savedAlert = await this.emergencyService.createEmergencyAlert(user.id, alertData, undefined, true);
     if (videoFile) {
-      return this.emergencyService.attachVideoToAlert(savedAlert.id, user.id, videoFile);
+      return this.emergencyService.attachVideoToAlert(savedAlert.id, user.id, videoFile, localSignature, publicKey);
     }
     return savedAlert;
   }
@@ -313,6 +322,14 @@ export class EmergencyController {
     @ActiveUser() user: UserActiveInterface,
   ): Promise<EmergencyAlertResponseDto> {
     return this.emergencyService.findOneEmergencyAlert(+id, user.id);
+  }
+
+  @Get('alerts/:id/certificado')
+  async descargarCertificado(
+    @Param('id') id: string,
+    @ActiveUser() user: UserActiveInterface,
+  ) {
+    return this.emergencyService.descargarCertificado(+id, user.id);
   }
 
   @Patch('alerts/:id/resolve')

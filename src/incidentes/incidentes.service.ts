@@ -8,6 +8,8 @@ import { IncidenteResponseDto } from './dto/incidente-response.dto';
 import { IncidenteMapaEntity } from './entities/incidente.entity';
 import { User } from '../users/entities/user.entity';
 import { BlockchainService } from '../blockchain/blockchain.service';
+import { CertificadoService } from './certificado.service';
+import { AwsS3Service } from '../common/services/aws-s3.service';
 
 @Injectable()
 export class IncidentesService {
@@ -19,6 +21,8 @@ export class IncidentesService {
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly blockchainService: BlockchainService,
+    private readonly certificadoService: CertificadoService,
+    private readonly awsS3Service: AwsS3Service,
   ) {}
 
   async create(dto: CreateIncidenteDto, usuarioId: number): Promise<IncidenteResponseDto> {
@@ -247,6 +251,21 @@ export class IncidentesService {
         blockchain_status: 'confirmado',
       });
       this.logger.log(`Incidente ${incidente.id_incidente} registrado en Sepolia: ${resultado.txHash}`);
+
+      // Generar certificado y subir a AWS S3
+      try {
+        const { pdf } = await this.certificadoService.generarCertificadoReporte(incidente.id_incidente);
+        const url = await this.awsS3Service.uploadBuffer(
+          pdf, 
+          'application/pdf', 
+          'pdf', 
+          'certificados'
+        );
+        await this.incidenteRepo.update(incidente.id_incidente, { certificado_url: url });
+        this.logger.log(`Certificado del incidente ${incidente.id_incidente} subido a S3: ${url}`);
+      } catch (pdfError) {
+        this.logger.error(`Error generando o subiendo certificado a S3 para incidente ${incidente.id_incidente}: ${pdfError.message}`);
+      }
     } catch {
       await this.incidenteRepo.update(incidente.id_incidente, { blockchain_status: 'fallido' });
     }

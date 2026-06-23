@@ -73,6 +73,9 @@ export class EmergencyAlert {
   @Column({ type: 'varchar', length: 20, default: 'sin_registro', nullable: true })
   blockchain_status: string; // 'sin_registro' | 'pendiente' | 'confirmado' | 'fallido'
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  certificado_url: string; // URL del PDF en S3
+
   @Column({ type: 'timestamp', nullable: true })
   resolvedAt: Date;
 

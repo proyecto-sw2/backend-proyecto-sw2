@@ -11,6 +11,7 @@ import { EmergencyNotificationService } from 'src/common/services/emergency-noti
 import { EmailNotificationService } from 'src/common/services/email-notification.service';
 import { WhatsAppNotificationService } from 'src/common/services/whatsapp-notification.service';
 import { BlockchainModule } from 'src/blockchain/blockchain.module';
+import { CertificadoEmergenciaService } from './certificado-emergencia.service';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { BlockchainModule } from 'src/blockchain/blockchain.module';
   controllers: [EmergencyController],
   providers: [
     EmergencyService,
+    CertificadoEmergenciaService,
     AwsS3Service,
     EmailNotificationService,
     WhatsAppNotificationService,

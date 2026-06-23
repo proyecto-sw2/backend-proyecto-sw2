@@ -7,7 +7,7 @@ export const ActiveUser = createParamDecorator(
     
     // Mapear los campos correctamente
     return {
-      id: request.user.userId, // userId -> id
+      id: request.user.id || request.user.userId, // userId -> id
       email: request.user.email,
       role: request.user.roles || 'user', // roles -> role
       name: request.user.name || 'Usuario'
